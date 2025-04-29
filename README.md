@@ -12,7 +12,6 @@ Una plataforma distribuida para el análisis de tráfico en tiempo real en la Re
 - [Uso](#uso)
 - [Interfaces Web](#interfaces-web)
 - [Monitoreo](#monitoreo)
-- [Desarrollo](#desarrollo)
 
 ## Arquitectura
 
