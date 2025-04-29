@@ -1,0 +1,115 @@
+version: '3'
+
+services:
+  # Base de datos MongoDB
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      app-network:
+        aliases:
+          - mongo  
+    restart: unless-stopped
+
+  # Servicio de caché Redis
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Servicio de scraping de datos
+  scraper:
+    build: ./scraper
+    container_name: scraper
+    volumes:
+      - ./data:/data
+    depends_on:
+      - mongodb
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Servicio de carga de datos a MongoDB
+  storage:
+    build: ./storage
+    container_name: storage
+    volumes:
+      - ./data:/data
+    depends_on:
+      - mongodb
+      - scraper
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Servicio de caché y API
+  cache:
+    build: ./cache
+    container_name: cache
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+      - mongodb
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Servicio generador de tráfico
+  traffic-generator:
+    build: ./traffic-generator
+    container_name: traffic-generator
+    depends_on:
+      - mongodb
+      - cache
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Interfaz web para MongoDB
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: pass123
+    depends_on:
+      - mongodb
+    networks:
+      - app-network
+
+  # Interfaz web para Redis
+  redis-webui:
+    image: erikdubbelboer/phpredisadmin
+    container_name: redis-webui
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    environment:
+      - REDIS_1_HOST=redis
+      - REDIS_1_PORT=6379
+    depends_on:
+      - redis
+    networks:
+      - app-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  app-network:
+    driver: bridge
