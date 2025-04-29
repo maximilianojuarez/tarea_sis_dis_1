@@ -99,8 +99,8 @@ El sistema alterna automáticamente entre distribuciones cada 10 minutos para si
 
 1. Clonar el repositorio:
    ```bash
-   git clone https://github.com/tu-usuario/plataforma-analisis-trafico.git
-   cd plataforma-analisis-trafico
+   git clone https://github.com/maximilianojuarez/tarea_sis_dis_1
+   cd tarea_sis_dis_1
    ```
 
 2. Construir e iniciar todos los servicios:
@@ -176,25 +176,3 @@ docker-compose logs -f traffic-generator
 # Ver todos los logs
 docker-compose logs -f
 ```
-
-## Desarrollo
-
-Para desarrollo local:
-
-1. Crear un entorno virtual:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # En Windows: venv\Scripts\activate
-   ```
-
-2. Instalar dependencias:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Ejecutar componentes individuales:
-   ```bash
-   python scraper/scraper.py
-   python traffic-generator/generator.py
-   ```
-
