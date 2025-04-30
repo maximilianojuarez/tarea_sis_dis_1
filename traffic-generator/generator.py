@@ -8,6 +8,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 import datetime
 import threading
+import redis
 
 
 # Configuración de logging
@@ -21,24 +22,27 @@ CACHE_TTL = 300  # Tiempo de vida de la caché en segundos
 
 # Configuración de distribuciones
 DISTRIBUTION_PARAMS = {
-    "poisson": {
-        "lambda_rate": 10/60,  # 10 consultas por minuto en promedio
-        "description": "Distribución de Poisson para simular llegadas aleatorias uniformes"
-    },
     "normal": {
-        "mean": 5,          # Media de 5 segundos entre consultas
-        "std_dev": 2,       # Desviación estándar de 2 segundos
+        "mean": 1,       #5   
+        "std_dev": 0.5,      #2 
         "description": "Distribución Normal para simular picos de tráfico"
+    },
+    "zipf": {
+        "s": 2, #1.5
+        "description": "Distribución Zipf para popularidad de consultas"
     }
 }
 
 # Variables para estadísticas
 stats = {
-    "poisson": {"queries": 0, "hits": 0, "misses": 0, "errors": 0, "response_time_sum": 0},
     "normal": {"queries": 0, "hits": 0, "misses": 0, "errors": 0, "response_time_sum": 0},
+    "zipf": {"queries": 0, "hits": 0, "misses": 0, "errors": 0, "response_time_sum": 0},
     "total_queries": 0,
     "start_time": time.time()
 }
+
+# Configuración de Redis
+redis_client = redis.Redis(host='redis', port=6379, db=0)
 
 
 def get_mongo_client():
@@ -63,43 +67,54 @@ def get_mongo_client():
     logger.critical("Falló la conexión a MongoDB después de múltiples intentos")
     raise Exception("No se pudo establecer conexión con MongoDB")
 
-def get_random_event_id(collection):
-    """Obtiene un ID aleatorio de eventos de Waze existentes en MongoDB"""
-    try:
-        # Obtener una lista de todos los UUIDs existentes
-        all_events = list(collection.find({}, {"uuid": 1, "_id": 0}))
-        
-        if not all_events:
-            logger.warning("No hay eventos en la base de datos")
-            return None
-            
-        # Filtrar solo los que comienzan con waze_
-        waze_events = [e for e in all_events if e.get('uuid', '').startswith('waze_')]
-        
-        if not waze_events:
-            logger.warning("No hay eventos de Waze en la base de datos")
-            return None
-        
-        # Seleccionar un evento aleatorio
-        event = random.choice(waze_events)
-        logger.info(f"Seleccionado evento con UUID: {event['uuid']}")
-        
-        return event["uuid"]
-    except Exception as e:
-        logger.error(f"Error obteniendo evento aleatorio: {e}")
+def get_normal_event_id(collection, mean=5, std_dev=2):
+    """
+    Obtiene un ID de evento usando una distribución Normal truncada.
+    Simula que algunos eventos son más populares (cercanos al centro de la lista).
+    """
+    all_events = list(collection.find({"uuid": {"$regex": "^waze_"}}, {"uuid": 1, "_id": 0}))
+    n = len(all_events)
+    if n == 0:
+        logger.warning("No hay eventos en la base de datos para Normal")
         return None
+    # Genera un índice según una normal centrada en la mitad de la lista
+    center = n // 2
+    while True:
+        idx = int(np.random.normal(loc=center, scale=n//6))  
+        if 0 <= idx < n:
+            break
+    event = all_events[idx]
+    logger.info(f"Seleccionado evento (Normal) con UUID: {event['uuid']}")
+    return event["uuid"]
 
-def poisson_distribution(lambda_rate):
-    """Genera intervalos de tiempo siguiendo distribución de Poisson"""
-    # Tiempo entre llegadas sigue una distribución exponencial
-    interval = np.random.exponential(1.0 / lambda_rate)
-    return max(0.1, interval)  # Evitar intervalos muy pequeños
+def get_zipf_event_id(collection, s=1.5):
+    """Obtiene un ID de evento usando distribución de Zipf"""
+    all_events = list(collection.find({"uuid": {"$regex": "^waze_"}}, {"uuid": 1, "_id": 0}))
+    n = len(all_events)
+    if n == 0:
+        logger.warning("No hay eventos en la base de datos para Zipf")
+        return None
+    # Genera un índice según Zipf (puede ser mayor que n, por eso el while)
+    while True:
+        idx = np.random.zipf(s) - 1 
+        if idx < n:
+            break
+    event = all_events[idx]
+    logger.info(f"Seleccionado evento (Zipf) con UUID: {event['uuid']}")
+    return event["uuid"]
 
 def normal_distribution(mean, std_dev):
     """Genera intervalos de tiempo siguiendo distribución Normal"""
     # Tiempo entre llegadas sigue una distribución normal
     interval = np.random.normal(mean, std_dev)
-    return max(0.1, interval)  # Asegurar intervalos positivos
+    return max(0.1, interval)  
+
+def get_random_ttl(min_ttl=60, max_ttl=900):
+    """
+    Genera un TTL aleatorio entre min_ttl y max_ttl segundos.
+    Por defecto: entre 1 minuto (60s) y 15 minutos (900s).
+    """
+    return random.randint(min_ttl, max_ttl)
 
 def send_query(event_id, distribution_type):
     """Envía una consulta al servicio de caché"""
@@ -107,8 +122,10 @@ def send_query(event_id, distribution_type):
         return False
     
     try:
-        url = f"{CACHE_URL}?id={event_id}&distribution={distribution_type}"
-        logger.info(f"Enviando consulta: {url}")
+        # Generar un TTL aleatorio para cada consulta
+        ttl = get_random_ttl()
+        url = f"{CACHE_URL}?id={event_id}&distribution={distribution_type}&ttl={ttl}"
+        logger.info(f"Enviando consulta: {url} (TTL={ttl}s)")
         
         start_time = time.time()
         response = requests.get(url)
@@ -141,18 +158,19 @@ def send_query(event_id, distribution_type):
 def generate_traffic(distribution_type, collection):
     """Genera tráfico según la distribución especificada"""
     logger.debug(f"Generando tráfico con distribución {distribution_type}")
-    
-    if distribution_type == "poisson":
-        params = DISTRIBUTION_PARAMS["poisson"]
-        interval = poisson_distribution(params["lambda_rate"])
-    else:
+    if distribution_type == "normal":
         params = DISTRIBUTION_PARAMS["normal"]
         interval = normal_distribution(params["mean"], params["std_dev"])
-    
+        event_id = get_normal_event_id(collection, params["mean"], params["std_dev"])
+    elif distribution_type == "zipf":
+        interval = 0.1 #poner1
+        event_id = get_zipf_event_id(collection)
+    else:
+        logger.error(f"Distribución desconocida: {distribution_type}")
+        return False
+
     logger.debug(f"Intervalo generado: {interval:.2f} segundos")
     time.sleep(interval)
-    
-    event_id = get_random_event_id(collection)
     if event_id:
         return send_query(event_id, distribution_type)
     return False
@@ -171,7 +189,7 @@ def print_stats_periodically():
         rate = total_queries / elapsed
         
         # Estadísticas por distribución
-        for dist in ["poisson", "normal"]:
+        for dist in ["normal", "zipf"]:
             if stats[dist]["queries"] > 0:
                 hit_rate = (stats[dist]["hits"] / stats[dist]["queries"]) * 100
                 avg_time = stats[dist]["response_time_sum"] / stats[dist]["queries"] * 1000
@@ -198,6 +216,7 @@ def main():
     db = client['traffic_db']
     global collection
     collection = db['traffic_events']
+    global current_distribution
     
     # Esperar a que haya datos en la base
     while collection.count_documents({}) < 10:
@@ -207,8 +226,8 @@ def main():
     logger.info(f"Base de datos tiene {collection.count_documents({})} eventos")
     
     # Variables para alternar entre distribuciones
-    current_distribution = "poisson"
-    distribution_switch_time = time.time() + 600 
+    distribuciones = ["normal", "zipf"]
+    idx = 0
     
     # Iniciar hilo para imprimir estadísticas periódicamente
     stats_thread = threading.Thread(target=print_stats_periodically, daemon=True)
@@ -217,14 +236,23 @@ def main():
     # Generar tráfico continuamente
     query_count = 0
     start_time = time.time()
+    current_distribution = redis_client.get("current_distribution")
+    if current_distribution:
+        current_distribution = current_distribution.decode()
+    else:
+        current_distribution = "unknown"
     
     while True:
         try:
             # Verificar si es momento de cambiar la distribución
             if time.time() >= distribution_switch_time:
-                current_distribution = "normal" if current_distribution == "poisson" else "poisson"
+                idx = (idx + 1) % len(distribuciones)
+                current_distribution = distribuciones[idx]
                 logger.info(f"Cambiando a distribución {current_distribution}")
                 distribution_switch_time = time.time() + 600  
+                
+                # Actualizar la distribución actual en Redis
+                redis_client.set("current_distribution", current_distribution)
             
             # Generar una consulta
             if generate_traffic(current_distribution, collection):

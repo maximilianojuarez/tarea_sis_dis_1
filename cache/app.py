@@ -43,7 +43,7 @@ cache_ttl = 300
 CACHE_TTL = 600  
 
 # Tamaño máximo de la caché
-MAX_CACHE_SIZE = 100  
+MAX_CACHE_SIZE = 1000 
 
 # Para LFU: contador de hits por clave
 cache_hits_counter = {}
@@ -254,6 +254,12 @@ def get_stats():
         except Exception as e:
             redis_info = {"error": str(e)}
         
+        current_distribution = redis_client.get("current_distribution")
+        if current_distribution:
+            current_distribution = current_distribution.decode()
+        else:
+            current_distribution = "unknown"
+        
         stats = {
             "hits": cache_stats["hits"],
             "misses": cache_stats["misses"],
@@ -262,7 +268,8 @@ def get_stats():
             "cache_policy": cache_policy,
             "cache_size": redis_client.dbsize(),
             "redis_info": redis_info,
-            "status": "Service running"
+            "status": "Service running",
+            "current_distribution": current_distribution
         }
         
         return jsonify(stats)
@@ -288,9 +295,10 @@ def set_policy():
 def clear_cache():
     """Endpoint para limpiar la caché"""
     redis_client.flushdb()
+    cache_usage_time.clear()
+    cache_hits_counter.clear()
     logger.info("Cache cleared")
     return jsonify({"message": "Cache cleared successfully"})
-
 
 
 # Agregar esta función para validar el ID del evento
@@ -349,4 +357,11 @@ def evict_from_cache():
         logger.error(f"Error en evicción de caché: {e}")
 
 if __name__ == '__main__':
+ 
+    distribuciones = ["normal", "zipf"]
+    idx = 0
+    current_distribution = distribuciones[idx]
+    redis_client.set("current_distribution", current_distribution)
+    distribution_switch_time = time.time() + 600
+
     app.run(host='0.0.0.0', port=5000)
