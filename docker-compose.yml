@@ -45,7 +45,6 @@ services:
       - ./data:/data
     depends_on:
       - mongodb
-     # - scraper
     networks:
       - app-network
     restart: unless-stopped
