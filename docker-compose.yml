@@ -43,6 +43,7 @@ services:
     container_name: storage
     volumes:
       - ./data:/data
+      - ./etl:/etl 
     depends_on:
       - mongodb
     networks:
@@ -62,16 +63,32 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Servicio generador de tráfico
-  traffic-generator:
-    build: ./traffic-generator
-    container_name: traffic-generator
+   # Servicio de filtrado y homogeneización
+  pig-filter:
+    build: ./pig
+    container_name: pig-filter
+    volumes:
+      - ./etl:/etl
+      - ./pig-scripts:/scripts
+    command: ["/bin/sh", "-c", "rm -rf /etl/fail && rm -rf /etl/clean && mkdir -p /etl/fail /etl/clean && /opt/pig/bin/pig -x local /scripts/clean_filter.pig"]
     depends_on:
       - mongodb
-      - cache
     networks:
       - app-network
-    restart: unless-stopped
+
+  # Servicio de procesamiento
+  pig-processing:
+    build: ./pig
+    container_name: pig-processing
+    volumes:
+      - ./etl:/etl
+      - ./pig-scripts:/scripts
+      - ./pig:/pig 
+    command: ["sh", "-c", "rm -rf /etl/agg && mkdir -p /etl/agg && /opt/pig/bin/pig -x local -f /scripts/processing.pig"]
+    depends_on:
+      - pig-filter
+    networks:
+      - app-network
 
   # Interfaz web para MongoDB
   mongo-express:

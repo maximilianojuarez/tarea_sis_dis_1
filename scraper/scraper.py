@@ -8,7 +8,19 @@ import requests
 import uuid
 from requests.exceptions import RequestException
 
-
+def get_random_user_agent():
+    """Retorna un User-Agent aleatorio para evitar detección"""
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:89.0) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/91.0.864.59",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15"
+    ]
+    return random.choice(user_agents)
 
 USED_UUIDS = set()
 
@@ -25,12 +37,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('scraper')
 
 # Definición del bounding box de la Región Metropolitana
-# Estas coordenadas forman un rectángulo que cubre toda la RM
 RM_BOUNDING_BOX = {
-    "min_lat": -33.83,  # Sur
-    "max_lat": -33.15,  # Norte
-    "min_lon": -71.08,  # Oeste
-    "max_lon": -70.41   # Este
+    "min_lat": -33.70,  # Sur (San Bernardo/Puente Alto)
+    "max_lat": -33.20,  # Norte (Colina)
+    "min_lon": -71.00,  # Oeste (Melipilla)
+    "max_lon": -70.45   # Este (Lo Barnechea)
 }
 
 # División en cuadrantes para consultas más efectivas
@@ -69,53 +80,103 @@ def generate_quadrants(bbox, grid_size=2):
 # Generar cuadrantes para toda la región
 RM_QUADRANTS = generate_quadrants(RM_BOUNDING_BOX, grid_size=3)
 
-# Agregar después de las definiciones de RM_QUADRANTS
-
-# Mapeo de cuadrantes a comunas
+# Mapeo de cuadrantes a comunas 
 QUADRANT_TO_COMUNA = {
     "1-1": "Maipú/Padre Hurtado",
-    "1-2": "San Bernardo/Buin",
+    "1-2": "San Bernardo/Buin", 
     "1-3": "Puente Alto/La Florida",
     "2-1": "Pudahuel/Cerro Navia",
     "2-2": "Santiago Centro/Estación Central",
     "2-3": "Las Condes/Providencia",
-   
+    "3-1": "Melipilla/Talagante",
+    "3-2": "Paine/San Bernardo Sur",
+    "3-3": "Pirque/Puente Alto Sur"
 }
 
 # Función para determinar la comuna basada en coordenadas
 def get_comuna_from_coordinates(lat, lon):
     """Determina la comuna basada en coordenadas geográficas"""
-   
     
-    # Comunas del sector oriente
-    if lat > -33.42 and lon > -70.58:
-        return "Las Condes"
-    elif lat > -33.45 and lon > -70.60:
-        return "Providencia"
-    elif lat > -33.51 and lon > -70.58:
-        return "La Florida"
-    elif lat < -33.55 and lon > -70.60:
-        return "Puente Alto"
-    elif lat < -33.60 and lon < -70.70:
+    # Cuadrante 2-3: Las Condes/Providencia (noreste)
+    if lat >= -33.45 and lat <= -33.35 and lon >= -70.65 and lon <= -70.55:
+        if lat >= -33.42:
+            return "Vitacura" if lon >= -70.60 else "Providencia"
+        elif lat >= -33.40:
+            return "Las Condes" if lon >= -70.58 else "Providencia"
+        else:
+            return "Lo Barnechea"
+    
+    # Cuadrante 3-1: Melipilla/Talagante (oeste lejano)
+    if lat >= -33.65 and lat <= -33.45 and lon <= -70.85:
+        if lat >= -33.55:
+            return "Melipilla"
+        else:
+            return "Talagante"
+    
+    # Cuadrante 1-1: Maipú/Padre Hurtado (noroeste)
+    if lat >= -33.55 and lat <= -33.35 and lon >= -70.85 and lon <= -70.70:
+        if lat >= -33.45:
+            return "Maipú"
+        else:
+            return "Padre Hurtado"
+    
+    
+    # ZONA NORTE (lat >= -33.30)
+    if lat >= -33.20:
+        return "Colina"
+    elif lat >= -33.30:
+        if lon <= -70.70:
+            return "Quilicura"
+        else:
+            return "Huechuraba"
+    
+    # ZONA NORTE-CENTRO (lat: -33.30 a -33.40)
+    elif lat >= -33.40:
+        if lon <= -70.70:
+            return "Renca" if lat >= -33.35 else "Conchalí"
+        elif lon <= -70.60:
+            return "Recoleta" if lat >= -33.35 else "Independencia"
+        else:
+            return "Lo Barnechea"
+    
+    # ZONA CENTRO-NORTE (lat: -33.40 a -33.50)
+    elif lat >= -33.50:
+        if lon <= -70.70:
+            return "Lo Prado" if lat >= -33.45 else "Quinta Normal"
+        elif lon <= -70.65:
+            return "Santiago" if lat >= -33.45 else "Estación Central"
+        elif lon <= -70.60:
+            return "Providencia" if lat >= -33.45 else "Ñuñoa"
+        elif lon <= -70.58:
+            return "Las Condes" if lat >= -33.43 else "La Reina"
+        else:
+            return "Vitacura" if lat >= -33.42 else "Peñalolén"
+    
+    # ZONA CENTRO-SUR (lat: -33.50 a -33.60)
+    elif lat >= -33.60:
+        if lon <= -70.70:
+            return "Cerrillos" if lat >= -33.55 else "Lo Espejo"
+        elif lon <= -70.65:
+            return "Pedro Aguirre Cerda" if lat >= -33.55 else "San Miguel"
+        elif lon <= -70.60:
+            return "San Joaquín" if lat >= -33.55 else "La Cisterna"
+        elif lon <= -70.58:
+            return "Macul" if lat >= -33.55 else "La Florida"
+        else:
+            return "Peñalolén" if lat >= -33.55 else "La Florida"
+    
+    # ZONA SUR (lat: -33.60 a -33.70)
+    elif lat >= -33.70:
+        if lon <= -70.65:
+            return "El Bosque" if lat >= -33.65 else "San Ramón"
+        elif lon <= -70.60:
+            return "La Granja" if lat >= -33.65 else "La Pintana"
+        else:
+            return "Puente Alto"
+    
+    # ZONA SUR EXTREMO (lat < -33.70)
+    else:
         return "San Bernardo"
-    elif lat < -33.50 and lon < -70.75:
-        return "Maipú"
-    elif lat > -33.45 and lon < -70.68:
-        return "Santiago Centro"
-  
-    return "Región Metropolitana"
-
-# User-Agents para rotar
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/112.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
-]
-
-def get_random_user_agent():
-    """Devuelve un User-Agent aleatorio de la lista"""
-    return random.choice(USER_AGENTS)
 
 def get_traffic_data_for_quadrant(quadrant):
     """Obtiene datos de tráfico para un cuadrante usando la API de Waze"""
@@ -148,8 +209,15 @@ def get_traffic_data_for_quadrant(quadrant):
         return []
 
 def process_waze_data(data, quadrant):
-    """Procesa los datos obtenidos de la API de Waze"""
+    """Procesa los datos obtenidos de la API de Waze - VERSIÓN CORREGIDA"""
     events = []
+    
+    # DEBUG: Mostrar coordenadas del cuadrante
+    quadrant_id = quadrant["name"].replace("RM Cuadrante ", "")
+    logger.info(f"DEBUG Cuadrante {quadrant_id}")
+    logger.info(f"  Rango lat: {quadrant['min_lat']:.3f} a {quadrant['max_lat']:.3f}")
+    logger.info(f"  Rango lon: {quadrant['min_lon']:.3f} a {quadrant['max_lon']:.3f}")
+    logger.info(f"  Centro: {quadrant['lat']:.3f}, {quadrant['lon']:.3f}")
     
     # Procesar alertas (accidentes, peligros, policía, etc.)
     if "alerts" in data and isinstance(data["alerts"], list):
@@ -176,10 +244,8 @@ def process_waze_data(data, quadrant):
                 # Usar el ID de Waze, o generar uno si no existe
                 waze_id = alert.get("id", None) or alert.get("uuid", None)
                 if not waze_id:
-                    # Si Waze no proporciona ID, generamos uno
                     waze_id = str(uuid.uuid4())
                 else:
-                    # Añadir prefijo para indicar que es un ID de Waze
                     waze_id = f"waze_{waze_id}"
                 
                 # Crear evento
@@ -199,7 +265,7 @@ def process_waze_data(data, quadrant):
             except Exception as e:
                 logger.error(f"Error procesando alerta: {e}")
     
-    # Procesar atascos/congestiones de manera similar
+    # Procesar atascos/congestiones
     if "jams" in data and isinstance(data["jams"], list):
         for jam in data["jams"]:
             try:
@@ -247,25 +313,23 @@ def process_waze_data(data, quadrant):
             except Exception as e:
                 logger.error(f"Error procesando congestión: {e}")
     
-    # Determinar la comuna representativa del cuadrante
-    comuna_representativa = get_comuna_from_coordinates(quadrant["lat"], quadrant["lon"])
-
-    # Alternativa: extraer el ID del cuadrante y usar el mapeo predefinido
-    quadrant_id = quadrant["name"].replace("RM Cuadrante ", "")
-    comuna_mapeo = QUADRANT_TO_COMUNA.get(quadrant_id, comuna_representativa)
-
-    logger.info(f"Extraídos {len(events)} eventos para {comuna_mapeo}")
-
-    # Obtener distribución de comunas
+    # LOGGING MEJORADO - Usar distribución real de comunas
     if events:
         comuna_distribution = get_comunas_distribution(events)
         main_comuna = comuna_distribution[0][0] if comuna_distribution else "Desconocido"
-        logger.info(f"Extraídos {len(events)} eventos para {main_comuna} y otras comunas")
-        # Opcional: mostrar detalle de distribución
-        for comuna, count in comuna_distribution[:3]:  # Mostrar top 3
+        
+        # Extraer el ID del cuadrante para referencia
+        quadrant_id = quadrant["name"].replace("RM Cuadrante ", "")
+        comuna_esperada = QUADRANT_TO_COMUNA.get(quadrant_id, "N/A")
+        
+        logger.info(f"Cuadrante {quadrant_id} (esperado: {comuna_esperada})")
+        logger.info(f"Extraídos {len(events)} eventos distribuidos en:")
+        
+        # Mostrar distribución real
+        for comuna, count in comuna_distribution[:5]:  # Top 5 comunas
             logger.info(f"  - {comuna}: {count} eventos")
     else:
-        logger.info(f"No se extrajeron eventos para este cuadrante")
+        logger.info(f"No se extrajeron eventos para {quadrant['name']}")
 
     return events
 
@@ -313,7 +377,7 @@ def get_nearest_comuna(lat, lon):
     nearest_comuna = "Región Metropolitana"
     
     for comuna in COMUNAS_RM:
-        # Cálculo simple de distancia euclidiana (suficiente para comparación)
+        # Cálculo simple de distancia euclidiana
         distance = ((comuna["lat"] - lat) ** 2 + (comuna["lon"] - lon) ** 2) ** 0.5
         if distance < min_distance:
             min_distance = distance

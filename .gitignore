@@ -1,1 +1,6 @@
 data/
+etl/events_raw.csv
+etl/events_raw.json
+etl/agg/
+etl/clean/
+etl/fail/
