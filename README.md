@@ -456,5 +456,4 @@ docker-compose logs -f
 
 
 **Tecnologías**: Docker, Apache Pig, MongoDB, Redis, Python, Bash, API Waze
-```
 
