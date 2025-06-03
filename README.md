@@ -97,7 +97,7 @@ El pipeline ETL procesa los datos en las siguientes etapas:
 
 ### Agregaciones Generadas
 
-```
+
 etl/agg/
 ├── temporal/
 │   ├── by_hour/           # Eventos agrupados por hora (00, 01, 02, ...)
@@ -106,7 +106,7 @@ etl/agg/
 │       └── hora_peek_XXh/ # Análisis detallado de la hora pico detectada
 ├── by_comuna/             # Eventos agrupados por comuna de la RM
 └── by_type/               # Eventos agrupados por tipo de incidente
-```
+
 
 ### Detección Automática de Hora Pico
 
