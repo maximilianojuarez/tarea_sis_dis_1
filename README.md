@@ -95,9 +95,9 @@ El pipeline ETL procesa los datos en las siguientes etapas:
    - Clasificación de tipos de incidentes
 3. **Carga**: Generación de agregaciones en directorios organizados
 
+```
 ### Agregaciones Generadas
 
-```
 etl/agg/
 ├── temporal/
 │   ├── by_hour/           # Eventos agrupados por hora (00, 01, 02, ...)
@@ -454,7 +454,6 @@ docker-compose logs -f
 
 ---
 
-
 **Tecnologías**: Docker, Apache Pig, MongoDB, Redis, Python, Bash, API Waze
-```
+
 
