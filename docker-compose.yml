@@ -1,3 +1,4 @@
+# docker-compose.yml - Integrado con tu arquitectura existente
 version: '3'
 
 services:
@@ -10,20 +11,105 @@ services:
     volumes:
       - mongodb_data:/data/db
     networks:
-      app-network:
-        aliases:
-          - mongo  
+      - app-network
     restart: unless-stopped
 
-  # Servicio de caché Redis
+  # Elasticsearch (actualizado a versión compatible)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.2
+    container_name: elasticsearch
+    restart: always
+    volumes:
+      - elastic_data:/usr/share/elasticsearch/data/
+    environment:
+      ES_JAVA_OPTS: "-Xmx512m -Xms512m"  
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+    ports:
+      - '9200:9200'
+      - '9300:9300'
+    networks:
+      - app-network
+
+  # Logstash
+  logstash:
+    build:
+      context: ./logstash
+    container_name: logstash
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    volumes:
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logstash/config/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
+      - ./logstash/pipelines:/usr/share/logstash/pipelines:ro
+      - ./etl:/etl:ro
+      - logstash_data:/usr/share/logstash/data
+      - shared_data:/shared
+    environment:
+      - LS_JAVA_OPTS=-Xmx512m -Xms512m
+    depends_on:
+      - elasticsearch
+      - mongodb
+    networks:
+      - app-network
+
+  # Kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.10.2
+    container_name: kibana
+    restart: always       
+    ports:
+      - '5601:5601'
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+    depends_on:
+      - elasticsearch  
+    networks:
+      - app-network
+
+  # Redis 
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     container_name: redis
     ports:
       - "6379:6379"
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --save 60 1000
+    volumes:
+      - redis_data:/data
     networks:
       - app-network
     restart: unless-stopped
+
+  # Microservicio de Caché HTTP/REST con FastAPI
+  traffic-cache-api:
+    build: ./cache
+    container_name: traffic-cache-api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_DB=traffic_db
+    depends_on:
+      - redis
+      - elasticsearch
+      - mongodb
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: uvicorn app:app --host 0.0.0.0 --port 8000
 
   # Servicio de scraping de datos
   scraper:
@@ -50,20 +136,7 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Servicio de caché y API
-  cache:
-    build: ./cache
-    container_name: cache
-    ports:
-      - "5000:5000"
-    depends_on:
-      - redis
-      - mongodb
-    networks:
-      - app-network
-    restart: unless-stopped
-
-   # Servicio de filtrado y homogeneización
+  # Servicio de filtrado y homogeneización
   pig-filter:
     build: ./pig
     container_name: pig-filter
@@ -108,24 +181,52 @@ services:
     networks:
       - app-network
 
-  # Interfaz web para Redis
-  redis-webui:
-    image: erikdubbelboer/phpredisadmin
-    container_name: redis-webui
+  # Redis Commander (mejorado)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
     restart: unless-stopped
     ports:
-      - "8082:80"
+      - "8082:8081"
     environment:
-      - REDIS_1_HOST=redis
-      - REDIS_1_PORT=6379
+      - REDIS_HOSTS=local:redis:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=redis123
     depends_on:
       - redis
     networks:
       - app-network
 
+  # Sincronizador automático
+  elastic-sync:
+    image: alpine:latest
+    container_name: elastic-sync
+    volumes:
+      - ./scripts:/scripts:ro
+      - etl-data:/etl
+      - logstash_data:/shared/logstash/data
+      - shared_data:/shared
+    entrypoint: |
+     sh -c "
+       apk add --no-cache bash coreutils busybox-suid;
+       mkdir -p /var/log /shared;
+       echo '*/5 * * * * /scripts/sync_to_elastic.sh' > /etc/crontabs/root;
+       crond -f -l 2
+     "
+    networks:
+      - app-network
+    depends_on:
+      - logstash
+    restart: unless-stopped
+
 volumes:
   mongodb_data:
+  elastic_data: 
+  etl-data:    
+  logstash_data:
+  shared_data:
+  redis_data:
 
 networks:
-  app-network:
+  app-network:      
     driver: bridge
